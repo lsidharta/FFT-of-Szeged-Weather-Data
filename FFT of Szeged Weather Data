@@ -1,0 +1,268 @@
+---
+title: "FFT of Szeged Weather Data"
+author: "Liliek Sidharta"
+date: "June 14, 2019"
+output:
+  word_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(tinytex.verbose = TRUE)
+```
+## Introduction
+
+This goal of this project is to build a model that fit the temperatures in Szeged, Romania, that has four seasons climate. The data set used in this project is hourly measured temperatures between 2006 and 2016. The dataset is provided by [Kaggle](https://www.kaggle.com/budincsevity/szeged-weather). As the periodic nature of the temperature, the model is constructed using linear regression of frequencies derived with Fourier Transform analysis. 
+
+
+
+## Dataset and Data Preparation
+
+The dataset used for this analysis is historical weather data that contains 96453 records of measurement, observation and calculation of nine weather parameters: temperature (C), apparent temperature (C), precipitation type, humidity (%), wind speed (km/hr), wind bearing (degrees), visibility (km), cloud cover, and pressure (millibars). The data was measured hourly between 2006 and 2016. However, in this project, only two columns data is required, **Formatted.Date** and **temperature**.
+
+Weather data need to be ordered chronologically based on the Formatted.Date. column which is in ISO 8601 standard format.
+
+```{r weather, include=FALSE}
+weather = read.csv("C:/Users/lsidh/Documents/COURSES/Dataset/weatherHistory.csv", stringsAsFactors = FALSE, header=TRUE)
+weather[2881:2890,1]
+#after sorting
+weather.sort = weather[order(weather$Formatted.Date),]
+weather.sort[1:10,1]
+```
+
+The following graph of temperature data shows repeating pattern of seasonal temperature from January (low) to July (high) to Desember. There are eleven peaks of eleven summers from 2006 to 2016. The second chart represents yearly seasonal daily temperature pattern better than the first plot.
+
+```{r include=FALSE}
+library(lubridate)
+time = ymd_hms(weather.sort$Formatted.Date)
+```
+```{r echo=FALSE}
+par(mfrow = c(1,2))
+plot(time, weather.sort$Temperature..C., type="l", main= "Temperature 2006-2016", xlab="year", ylab="temperature(C)")
+timelimit = c(ymd_hms("2006-01-01 00:00:00.000 +0100"), ymd_hms("2006-01-31 23:00:00.000 +0100"))
+plot(time, weather.sort$Temperature..C., type="l", xlim=timelimit, ylim=c(-20,40), main="Temperature in Jan 2006", xlab="days", ylab = "Temperature(C)")
+```
+
+The first graph shows 11 major peaks and 12 major valleys that represent the highest summer and lowest winter temperatures in Szeged between 2006 and 2017. Also, the Jan 2016 graph shows 31 repeating up and down pattern of day and night temperature. Therefore, the cyclic behaviour of temperature in Szeged can be modeled linear regression of frequencies derived with Fourier Transform.
+
+$$y(t) = \frac{A_0}{2} + \sum^{N-1}_{k=1} { A_k\cdot cos(2\pi\cdot f_k\cdot t + \phi_k) }$$ ...(1)
+
+A training set will be used to determine the parameters $A_0$, $A_k$, $f_k$, and $\phi_k$ in the above equation. Fast Fourier Transform function will transform the training set to find the significant frequency components.
+
+
+## Create Linear Regression Model from Frequency for Temperature 
+
+Training set *temperature.train* is derived from column *Temperature..C.* measured from 2006-01-01 00:00:00 to 2014-12-31 23:00:00. It is about 80% of the original dataset, and the length of the data *Ntrain* is 5234499.
+
+```{r echo=FALSE}
+#Find the index of the first data of 2015, and use it to construct the training set.
+index.2014 = which( weather.sort$Formatted.Date == "2014-12-31 23:00:00.000 +0100")
+temperature.train = weather.sort$Temperature..C.[1:(index.2014)]
+Ntrain = length(temperature.train)
+t = 0:(Ntrain-1)
+```
+
+
+The Fast Fourier Transform on the training set:
+
+```{r }
+# FFT
+z = fft( temperature.train )
+A = Mod( z ) * 2 / length(z)
+phi = Arg( z )
+f = ( 0:(Ntrain-1))/Ntrain
+```
+
+```{r echo=FALSE}
+plot( f, A, type="l", main = "Fourier Transform of 2006-2014 Temperature", ylab="amplitude", xlab="frequency", cex.lab=0.75, cex.axis=0.75, col="blue" )
+```
+
+Mode detailed view of dominant amplitudes and frequencies is presented in the following three plots.
+
+```{r echo=FALSE}
+par(mfrow = c(1,2))
+plot( f, A, type="h", ylab="amplitude", xlab="frequency", cex.lab=0.75, cex.axis=0.75, col="blue", xlim = c(0,0.002), main="Frequency 0 to 0.002")
+plot( f, A, type="h", cex.lab=0.75, cex.axis=0.75, col="blue", xlim = c(0.04,0.0425), ann = FALSE); title(main="Frequency 0.04")
+par(mfrow = c(1,2))
+plot( f, A, type="h", ann = FALSE, cex.lab=0.75, cex.axis=0.75, col="blue", xlim = c(0.083,0.0837)); title(main="Frequency 0.08")
+plot( f, A, type="h", ann = FALSE, cex.lab=0.75, cex.axis=0.75, col="blue", xlim = c(0.124,0.126)); title(main="Frequency 0.125")
+```
+
+
+```{r }
+threshold = 0.6
+indices = which( A[1:(Ntrain/2)] > threshold )
+top.A = A[indices]
+top.f = f[indices]
+top.T = 1/top.f/24
+top.phi = phi[indices]
+```
+
+The following table shows the dominant amplitudes, frequencies and periods. The second dominant is the component that happens every 365 days or 1 year, and the third one represents the daily cyclic component. The peak at f=0 corresponds to the first term in the equation (1).
+
+```{r echo=FALSE}
+fft.result <- cbind(signif(top.A, digits=3), signif(top.phi, digits=3), signif(top.f, digits=3), signif(top.T,digits=3))
+colnames(fft.result) <- c("Amplitude", "Phase", "Frequency", "Period(days)"); fft.result
+```
+
+These are the amplitudes and frequencies related to the graph f=0, f=0.4, f=0.8. It is difficult to get the peak in the frequency range 0.125. 
+
+$$ y(t) = 11.9 + 11.30 cos( 2\pi\cdot0.000114\cdot t + 2.89 ) + 4.08 cos( 2\pi\cdot0.0417\cdot t + 2.22 ) + 1.12 cos( 2\pi\cdot0.0418\cdot t -0.914 ) + 0.954 cos( 2\pi\cdot0.0416\cdot t - 0.631 ) + 0.67 cos( 2\pi\cdot0.000418\cdot t - 0.825 ) + 0.67 cos( 2\pi\cdot0.000836\cdot t + 2.31 ) + 0.642 cos( 2\pi\cdot0.083\cdot t - 0.989 ) + 0.638 cos( 2\pi\cdot0.000101\cdot t + 0.13 ) $$ ...(2)
+
+### Reconstruct the Temperature
+
+All components in the above table are included in the following model to reconstruct the temperature.
+
+```{r }
+yc = function(t) {
+  return( top.A[1]/2 
+          + top.A[2] * cos( 2*pi*top.f[2]*t+top.phi[2] )
+          + top.A[3] * cos( 2*pi*top.f[3]*t+top.phi[3] )
+          + top.A[4] * cos( 2*pi*top.f[4]*t+top.phi[4] ) 
+          + top.A[5] * cos( 2*pi*top.f[5]*t+top.phi[5] ) 
+          + top.A[6] * cos( 2*pi*top.f[6]*t+top.phi[6] ) 
+          + top.A[7] * cos( 2*pi*top.f[7]*t+top.phi[7] ) 
+          + top.A[8] * cos( 2*pi*top.f[8]*t+top.phi[8] )
+          + top.A[9] * cos( 2*pi*top.f[9]*t+top.phi[9] ))
+}
+```
+
+Reconstruction of temperature's training set.
+
+```{r }
+tc = 0:(Ntrain-1)
+temperature.rec = yc(tc)
+```
+
+
+The result of the reconstruction is shown in the following three graphs, 2006-2014, 2006, and January 2006. 
+
+```{r echo=FALSE}
+time.train = ymd_hms(weather.sort$Formatted.Date[1:(index.2014)])
+plot(time.train, temperature.train, type="l", ylim=c(-20,40), main = "Original and Reconstructed Temperature", xlab="year", ylab="temperature(C)")
+points(time.train, temperature.rec, type="l", ylim=c(-20, 40), col="red")
+```
+
+```{r echo=FALSE}
+#plot 2006
+index.2006 = which( weather.sort$Formatted.Date == "2006-12-31 23:00:00.000 +0100")
+time.train.2016 = ymd_hms(weather.sort$Formatted.Date[1:index.2006])
+plot(time.train.2016, temperature.train[1:index.2006], type="l", ylim=c(-20,40), main="2006 Original and Reconstructed Temperature", ylab="temperatur(C)", xlab="month")
+points(time.train.2016, temperature.rec[1:index.2006], type="l", col="red")
+```
+
+```{r echo=FALSE}
+index.2006.Jan = which( weather.sort$Formatted.Date == "2006-01-31 23:00:00.000 +0100")
+time.train.2016.Jan = ymd_hms(weather.sort$Formatted.Date[1:index.2006.Jan])
+plot(time.train.2016.Jan, temperature.train[1:index.2006.Jan], type="l", ylim=c(-20,40), main="Jan 2006 Original and Reconstructed Temperature", ylab="temperatur(C)", xlab="day")
+
+points(time.train.2016.Jan, temperature.rec[1:index.2006.Jan], col="red", type="l")
+```
+
+### Analysis on the Linear Regression from Frequency Model
+
+The FFT model appears to fit the yearly and daily periodic behaviour. To access the goodness of fit of the FFT model to the temperature data, an analysis on the **residual between the data and the model** needs to be performed.
+
+The residual *dtemp* is a substraction of the reconstructed temperature from the training set.
+
+```{r }
+dtemp = temperature.train - temperature.rec 
+dtemp.mean = mean(dtemp)
+dtemp.var = var(dtemp)
+```
+```{r echo=FALSE}
+plot (time.train, dtemp, type="l", main="Residual Temperature", xlab="year", ylab = "temperature", ylim=c(-20, 40), sub = paste("mean=", signif(dtemp.mean, digits = 3), " variance=", signif(dtemp.var, digits = 3))) 
+```
+
+
+### Apply Autoregressive Analysis on the Residual 
+
+Mean and variance of the residual looks constant over the training set time range, so that **autoregressive model** can be applied on this residual analysis. 
+
+An autocorrelation between the residual components is calculated to determine independency among lag variables, and later to determine the order of AR model.
+
+```{r }
+acf = acf(dtemp, lag.max = 1000, type=c("correlation"), plot=TRUE)
+acf = acf(dtemp, lag.max = 100, type=c("correlation"), plot=TRUE)
+```
+
+The autocorrelation has oscillating and exponentially decay pattern. 
+
+An R's linear model function is used to calculate the linear combination's coefficient of lag variables.
+
+```{r comment="##"}
+dtemp0 = dtemp[6:Ntrain] # y(t)
+dtemp1 = dtemp[5:(Ntrain-1)] # y(t-1)
+dtemp2 = dtemp[4:(Ntrain-2)] # y(t-2)
+dtemp3 = dtemp[3:(Ntrain-3)]
+dtemp4 = dtemp[2:(Ntrain-4)]
+dtemp5 = dtemp[1:(Ntrain-5)]
+arm = summary(lm( dtemp0~dtemp1+dtemp2+dtemp3+dtemp4+dtemp5 )); arm
+```
+
+The summary of linear model function provides the coefficients of 1-lag to 5-lag variables. All lag variables included have small p-value, the lag variables are statistically significant. R-squared value is 0.9283, big enough to say that this residual is not caused by random white noise. The variation in the lag variables affect the temperature reconstruction or prediction.
+
+$$y_{AR} (t) = y(t-1) + 0.055 y(t-2) - 0.08 y(t-3) - 0.055 y(t-4) + 0.038 y(t-5)$$...(3)
+
+
+### Predict Temperature Test Set
+
+As mentioned earlier, training set is built from range 2006-2014 of Temperature data; the test set is the rest of Temperature data, range 2015-2016. 
+
+Using the
+
+### Prediction using Linear Regression from Frequency Model
+
+```{r }
+temp.rec=c(); N = length( weather.sort$Temperature..C. )
+t = Ntrain:(N-1)
+temp.rec[Ntrain:(N-1)] = yc(t)
+```
+
+### Prediction using AR(5) model
+
+The following code is to calculate the AR(5) prediction on test set.
+
+```{r }
+phi.ar = cbind( arm$coefficients[2:6] )
+dytemp.p = c()
+dytemp.p = (Ntrain-5):(N-1) #the length of dytemp going to predict
+dytemp.p[Ntrain-5] = temperature.train[Ntrain-5]
+dytemp.p[Ntrain-4] = temperature.train[Ntrain-4]
+dytemp.p[Ntrain-3] = temperature.train[Ntrain-3]
+dytemp.p[Ntrain-2] = temperature.train[Ntrain-2]
+dytemp.p[Ntrain-1] = temperature.train[Ntrain-1]
+dy_init = c()
+dy_init = cbind(dytemp.p[(Ntrain-1):(Ntrain-5)])
+for (k in Ntrain:(N-1)) {
+  dytemp.p[k] = t(phi.ar) %*% dy_init
+  dy_init = c()
+  dy_init = cbind(c(dytemp.p[k], dytemp.p[k-1], dytemp.p[k-2], dytemp.p[k-3], dytemp.p[k-4]))
+}
+```
+```{r echo=FALSE}
+plot(Ntrain:(N-1), dytemp.p[Ntrain:(N-1)], type="l" )
+```
+
+To get the final result, the reconstructed training set is combined with the predicted test set.
+
+```{r }
+temperature.rec[Ntrain:N] = temp.rec[Ntrain:N]+ dytemp.p[Ntrain:N]
+```
+```{r echo=FALSE}
+plot( time, weather.sort$Temperature..C., type="l", main="Temperature Prediction", sub="Training set:2006-2014; Test set: 2015-2016", ylab="Temperature(C)", xlab="year")
+points( time, temperature.rec, type="l", col="red"  )
+```
+
+## Conclusion
+
+Using Linear Regression of frequency and Autogregression AR(5), the temperature in Szeged can be predicted. Visually inspection on the Temperature Prediction graph, the periodic nature of the temperature can be estimated well.
+
+However, the Residual Standard Error that is derived by the following code is 4.23, a large number compared to the measured temperature which is between -20 to 40 Celcius.
+
+```{r }
+se = sqrt( sum( (weather.sort$Temperature..C. - temperature.rec)^2) / (N-2))
+```
+
+It is mentioned in a literature that absolute temperature is affected only by the sun radiation, and together with humidity, pressure and wind speed it will determine the apparent temperature. Therefore, the absolute temperature prediction might need more accurate method than linear regression with frequency and residual autoregression.
